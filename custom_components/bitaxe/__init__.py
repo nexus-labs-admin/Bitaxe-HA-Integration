@@ -3,7 +3,7 @@ import aiohttp
 import logging
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.event import async_track_time_interval
 
 DOMAIN = "bitaxe"
@@ -53,4 +53,4 @@ async def fetch_bitaxe_data(ip_address):
                 return data
     except Exception as e:
         _LOGGER.error("Error fetching data from BitAxe API: %s", e)
-        return None
+        raise UpdateFailed(f"Error fetching data from BitAxe API: {e}") from e
