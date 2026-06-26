@@ -101,8 +101,16 @@ class BitAxeSensor(Entity):
         }
 
     @property
+    def available(self):
+        return self.coordinator.last_update_success and isinstance(self.coordinator.data, dict)
+
+    @property
     def state(self):
-        value = self.coordinator.data.get(self.sensor_type, None)
+        data = self.coordinator.data
+        if not isinstance(data, dict):
+            return None
+
+        value = data.get(self.sensor_type, None)
 
         if self.sensor_type in ["bestDiff", "bestSessionDiff"]:
             return format_difficulty(value)
