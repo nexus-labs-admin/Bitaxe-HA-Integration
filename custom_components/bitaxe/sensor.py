@@ -1,6 +1,16 @@
+from __future__ import annotations
+
 import logging
-from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from typing import Any
+
+from homeassistant import config_entries
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,12 +30,18 @@ SENSOR_NAME_MAP = {
     "uptimeSeconds": "Uptime",
 }
 
-async def async_setup_entry(hass, entry, async_add_entities):
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: config_entries.ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Set up BitAxe sensors from a config entry."""
-    coordinator = hass.data[DOMAIN][entry.unique_id]["coordinator"]
+    device_id = entry.unique_id or entry.data["ip_address"]
+    coordinator = hass.data[DOMAIN][device_id]["coordinator"]
     device_name = entry.data.get("device_name", "BitAxe Miner")
 
-    _LOGGER.debug(f"Setting up sensors for device: {device_name}")
+    _LOGGER.debug("Setting up sensors for device: %s", device_name)
 
     sensors = [
         BitAxeSensor(coordinator, "power", device_name, entry),
@@ -41,10 +57,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         BitAxeSensor(coordinator, "uptimeSeconds", device_name, entry),
     ]
 
-    async_add_entities(sensors, update_before_add=True)
+    async_add_entities(sensors)
 
 
-def format_difficulty(value) -> str | None:
+def format_difficulty(value: Any) -> str | None:
     """Convert difficulty values into human-readable units (k, M, G, T, P, E)."""
     if value is None:
         return None
@@ -71,41 +87,61 @@ def format_difficulty(value) -> str | None:
     return str(int(value))
 
 
+def format_uptime(seconds: Any) -> str:
+    """Convert uptime in seconds into a human-readable duration."""
+    remaining_seconds = int(seconds)
+    days, remaining_seconds = divmod(remaining_seconds, 86400)
+    hours, remaining_seconds = divmod(remaining_seconds, 3600)
+    minutes, remaining_seconds = divmod(remaining_seconds, 60)
+    return f"{days}d {hours}h {minutes}m {remaining_seconds}s"
 
-class BitAxeSensor(Entity):
+
+class BitAxeSensor(CoordinatorEntity[dict[str, Any]]):
     """Representation of a BitAxe sensor."""
 
-    def __init__(self, coordinator: DataUpdateCoordinator, sensor_type: str, device_name: str, entry):
-        super().__init__()
-        self.coordinator = coordinator
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
+        sensor_type: str,
+        device_name: str,
+        entry: config_entries.ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
         self.sensor_type = sensor_type
         self.entry = entry
         self._device_name = device_name
 
         # Entity attributes
-        self._attr_name = f"{SENSOR_NAME_MAP.get(sensor_type, sensor_type)} ({device_name})"
+        self._attr_name = (
+            f"{SENSOR_NAME_MAP.get(sensor_type, sensor_type)} ({device_name})"
+        )
         self._attr_unique_id = f"{entry.entry_id}_{sensor_type}"
         self._attr_icon = self._get_icon(sensor_type)
 
-        _LOGGER.debug(f"Initialized BitAxeSensor: {self._attr_name} (ID: {self._attr_unique_id})")
+        _LOGGER.debug(
+            "Initialized BitAxeSensor: %s (ID: %s)",
+            self._attr_name,
+            self._attr_unique_id,
+        )
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Group all sensors under one device."""
-        return {
-            "identifiers": {(DOMAIN, self.entry.entry_id)},
-            "name": self._device_name,
-            "manufacturer": "Open Source Hardware",
-            "model": "BitAxe Miner",
-            "via_device": None,
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.entry.entry_id)},
+            name=self._device_name,
+            manufacturer="Open Source Hardware",
+            model="BitAxe Miner",
+        )
 
     @property
-    def available(self):
-        return self.coordinator.last_update_success and isinstance(self.coordinator.data, dict)
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and isinstance(
+            self.coordinator.data, dict
+        )
 
     @property
-    def state(self):
+    def state(self) -> Any:
         data = self.coordinator.data
         if not isinstance(data, dict):
             return None
@@ -116,7 +152,7 @@ class BitAxeSensor(Entity):
             return format_difficulty(value)
 
         if self.sensor_type == "uptimeSeconds" and value is not None:
-            return self._format_uptime(value)
+            return format_uptime(value)
 
         if self.sensor_type == "power" and value is not None:
             return round(value, 1)
@@ -126,15 +162,8 @@ class BitAxeSensor(Entity):
 
         return value if value is not None else "N/A"
 
-    @staticmethod
-    def _format_uptime(seconds):
-        days, remainder = divmod(seconds, 86400)
-        hours, remainder = divmod(remainder, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        return f"{days}d {hours}h {minutes}m {seconds}s"
-
     @property
-    def unit_of_measurement(self):
+    def unit_of_measurement(self) -> str | None:
         if self.sensor_type == "power":
             return "W"
         elif self.sensor_type == "hashRate":
@@ -147,7 +176,7 @@ class BitAxeSensor(Entity):
             return "RPM"
         return None
 
-    def _get_icon(self, sensor_type):
+    def _get_icon(self, sensor_type: str) -> str:
         if sensor_type == "bestSessionDiff":
             return "mdi:star"
         elif sensor_type == "bestDiff":
